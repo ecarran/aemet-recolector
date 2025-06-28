@@ -26,7 +26,7 @@ def recolectar_datos():
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS observaciones (
-            idema INTEGER,
+            idema TEXT,
             ubi TEXT,
             fint TEXT,
             ta REAL,

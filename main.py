@@ -60,7 +60,9 @@ def recolectar():
             ubi = row["ubi"]
             lon = float(row["lon"])
             lat = float(row["lat"])
-            fint = row["fint"]
+            # Formatear fecha/hora a hora local en formato legible
+            utc_dt = datetime.fromisoformat(row["fint"].replace("Z", "+00:00"))
+            fint = utc_dt.astimezone(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
             ta = float(row.get("ta", "nan"))
             tamax = float(row.get("tamax", "nan"))
             tamin = float(row.get("tamin", "nan"))

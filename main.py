@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
-API_KEY = os.getenv("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJlY2FycmFuQGdtYWlsLmNvbSIsImp0aSI6IjhiYzYxOTVlLTQzMTItNDlkNi05YmQyLTQ4NzYxMDU4MmEwOCIsImlzcyI6IkFFTUVUIiwiaWF0IjoxNzUwNTAyOTE4LCJ1c2VySWQiOiI4YmM2MTk1ZS00MzEyLTQ5ZDYtOWJkMi00ODc2MTA1ODJhMDgiLCJyb2xlIjoiIn0.6Zkku0PT-6JTqCjOwklL4cjOzQrQTXM0eDh395gAKZc")
+API_KEY = os.getenv("AEMET_API_KEY")
 IDEMA = "2422"
 DB_PATH = "valladolid.db"
 URL_BASE = "https://opendata.aemet.es/opendata/api/observacion/convencional/todas/"

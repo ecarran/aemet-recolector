@@ -1,87 +1,96 @@
-from fastapi import FastAPI, Request, Response
-import requests
-import sqlite3
-from datetime import datetime
 import os
+import sqlite3
+import requests
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from datetime import datetime
+from pytz import timezone
 
 app = FastAPI()
+DB_FILENAME = "aemet_valladolid.db"
 
+API_URL = "https://opendata.aemet.es/opendata/api/observacion/convencional/todas/"
 API_KEY = os.getenv("AEMET_API_KEY")
-DB_FILE = "aemet_valladolid.db"
-STATION_IDEMA = 2422
 
-URL_BASE = "https://opendata.aemet.es/opendata/api/observacion/convencional/todas"
+@app.get("/")
+def raiz():
+    return {"mensaje": "API AEMET Valladolid activa. Usa /recolectar o /descargar-db"}
 
-def recolectar_datos():
-    headers = {"accept": "application/json", "api_key": API_KEY}
-    response = requests.get(URL_BASE, headers=headers)
-    response.raise_for_status()
+@app.get("/recolectar")
+def recolectar():
+    if not API_KEY:
+        return {"estado": "error", "mensaje": "API KEY no configurada"}
 
-    url_datos = response.json()["datos"]
-    response_datos = requests.get(url_datos)
-    response_datos.raise_for_status()
-    datos = response_datos.json()
+    try:
+        headers = {"accept": "application/json", "api_key": API_KEY}
+        r1 = requests.get(API_URL, headers=headers)
+        r1.raise_for_status()
+        url_datos = r1.json()["datos"]
 
-    conn = sqlite3.connect(DB_FILE)
+        r2 = requests.get(url_datos)
+        r2.raise_for_status()
+        datos = r2.json()
+    except Exception as e:
+        return {"estado": "error", "mensaje": f"Error al descargar datos: {e}"}
+
+    conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS observaciones (
             idema TEXT,
             ubi TEXT,
+            lon REAL,
+            lat REAL,
             fint TEXT,
             ta REAL,
             tamax REAL,
-            tamin REAL,
-            hr INTEGER,
-            vv REAL,
-            dv TEXT,
-            prec REAL,
-            PRIMARY KEY (idema, fint)
+            tamin REAL
         )
     """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_idema_fint ON observaciones(idema, fint)")
 
     insertados = 0
-    for fila in datos:
-        if int(fila["idema"]) != STATION_IDEMA:
+    for row in datos:
+        if row.get("ubi") != "VALLADOLID":
             continue
+
+        try:
+            idema = row["idema"]  # Dejar como texto
+            ubi = row["ubi"]
+            lon = float(row["lon"])
+            lat = float(row["lat"])
+            fint = row["fint"]
+            ta = float(row.get("ta", "nan"))
+            tamax = float(row.get("tamax", "nan"))
+            tamin = float(row.get("tamin", "nan"))
+        except Exception as e:
+            print("Error procesando fila:", e)
+            continue
+
+        cursor.execute("""
+            SELECT 1 FROM observaciones WHERE idema = ? AND fint = ?
+        """, (idema, fint))
+        if cursor.fetchone():
+            continue  # Ya existe, no insertar
+
         try:
             cursor.execute("""
-                INSERT OR IGNORE INTO observaciones (
-                    idema, ubi, fint, ta, tamax, tamin,
-                    hr, vv, dv, prec
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                int(fila["idema"]),
-                fila.get("ubi", ""),
-                fila["fint"],
-                float(fila.get("ta") or 0),
-                float(fila.get("tamax") or 0),
-                float(fila.get("tamin") or 0),
-                int(fila.get("hr") or 0),
-                float(fila.get("vv") or 0),
-                fila.get("dv", ""),
-                float(fila.get("prec") or 0)
-            ))
-            insertados += cursor.rowcount
+                INSERT INTO observaciones (
+                    idema, ubi, lon, lat, fint, ta, tamax, tamin
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (idema, ubi, lon, lat, fint, ta, tamax, tamin))
+            insertados += 1
         except Exception as e:
             print("Error insertando fila:", e)
 
     conn.commit()
     conn.close()
-    return f"{insertados} observaciones insertadas"
 
-@app.api_route("/recolectar", methods=["GET", "HEAD"])
-async def recolectar(request: Request):
-    if request.method == "HEAD":
-        return Response(status_code=200)
-    try:
-        resultado = recolectar_datos()
-        return {"estado": "ok", "mensaje": resultado}
-    except Exception as e:
-        return {"estado": "error", "mensaje": str(e)}
+    return {"estado": "ok", "insertados": insertados}
 
 @app.get("/descargar-db")
 def descargar_db():
-    from fastapi.responses import FileResponse
-    return FileResponse(DB_FILE, media_type='application/octet-stream', filename=DB_FILE)
-
+    if os.path.exists(DB_FILENAME):
+        return FileResponse(DB_FILENAME, media_type="application/octet-stream", filename=DB_FILENAME)
+    return {"estado": "error", "mensaje": "Fichero de base de datos no encontrado"}

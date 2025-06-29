@@ -1,0 +1,34 @@
+name: Backup AEMET DB
+
+on:
+  schedule:
+    - cron: '35 22 * * *'  # Cada día a las 22:35 UTC
+  workflow_dispatch:  # Ejecutable manualmente
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar base de datos
+        run: |
+          curl -L https://aemet-recolector.onrender.com/descargar-db -o aemet.db
+
+      - name: Configurar Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Subir archivo al repositorio
+        run: |
+          git init
+          git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git pull origin main || true
+
+          fecha=$(date +'%Y-%m-%d_%H-%M')
+          mkdir -p backups
+          mv aemet.db backups/aemet_$fecha.db
+
+          git add backups/
+          git commit -m "Backup automático del $fecha" || echo "Nada que confirmar"
+          git push origin main

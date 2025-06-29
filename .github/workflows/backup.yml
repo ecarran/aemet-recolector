@@ -45,7 +45,7 @@ jobs:
         run: |
           git init
           git remote add origin https://github.com/${{ github.repository }}
-          git checkout -b main
+          git checkout main || git checkout -b main
           git pull origin main
           git add backups/
           git commit -m "Backup automático del $(date +"%Y-%m-%d %H:%M")"

@@ -1,44 +1,50 @@
 name: Backup AEMET DB
 
 on:
-  schedule:
-    - cron: '55 23 * * *'  # Todos los días a las 23:55 UTC
-  workflow_dispatch:        # Permite ejecución manual
-
-permissions:
-  contents: write           # Necesario para git push
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-
     steps:
       - name: Set up job
-        run: echo "Inicio del backup AEMET"
+        run: echo "Iniciando backup AEMET"
+
+      - name: Llamar a /recolectar para asegurar DB actualizada
+        run: |
+          curl -s https://aemet-recolector.onrender.com/recolectar
+          echo "Esperando 10s para que Render procese..."
+          sleep 10
 
       - name: Descargar base de datos
-        run: curl -o aemet.db https://aemet-recolector.onrender.com/descargar-db
+        run: |
+          curl -o db.sqlite https://aemet-recolector.onrender.com/descargar-db
+          if [ ! -s db.sqlite ]; then
+            echo "❌ Error: la base de datos está vacía"
+            cat db.sqlite
+            exit 1
+          fi
 
       - name: Crear carpeta y mover archivo
         run: |
           mkdir -p backups
-          fecha=$(date +'%Y-%m-%d_%H-%M')
-          mv aemet.db "backups/aemet_${fecha}.db"
+          TS=$(date +"%Y-%m-%d_%H-%M")
+          mv db.sqlite "backups/aemet_$TS.db"
 
       - name: Configurar Git
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "bot@example.com"
+          git config --global user.name "GitHub Actions Bot"
 
       - name: Inicializar y subir archivo al repositorio
         run: |
           git init
-          git remote add origin https://github.com/${{ github.repository }}.git
-          git fetch origin main
-          git checkout main
+          git remote add origin https://github.com/${{ github.repository }}
+          git checkout -b main
           git pull origin main
-          git add backups/*.db
-          git commit -m "Backup automático del $(date +'%Y-%m-%d %H:%M')"
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+          git add backups/
+          git commit -m "Backup automático del $(date +"%Y-%m-%d %H:%M")"
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
+
 
 

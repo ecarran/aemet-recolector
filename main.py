@@ -5,21 +5,47 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from datetime import datetime
 from pytz import timezone
+from threading import Thread
 
 app = FastAPI()
 DB_FILENAME = "aemet_valladolid.db"
-
 API_URL = "https://opendata.aemet.es/opendata/api/observacion/convencional/todas/"
 API_KEY = os.getenv("AEMET_API_KEY")
 
 @app.get("/")
-def raiz():
-    return {"mensaje": "API AEMET Valladolid activa. Usa /recolectar o /descargar-db"}
+def keep_alive():
+    now = datetime.now()
+    db_exists = os.path.exists(DB_FILENAME)
+    n_registros = -1
 
-@app.get("/recolectar")
-def recolectar():
+    try:
+        if db_exists:
+            conn = sqlite3.connect(DB_FILENAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM observaciones")
+            n_registros = cursor.fetchone()[0]
+            conn.close()
+    except Exception as e:
+        print(f"[KEEPALIVE] Error al contar registros: {e}")
+
+    log_entry = f"[KEEPALIVE] {now.strftime('%Y-%m-%d %H:%M:%S')} - DB: {db_exists} - Registros: {n_registros}\n"
+    try:
+        with open("keepalive.log", "a") as f:
+            f.write(log_entry)
+    except Exception as e:
+        print(f"[KEEPALIVE] Error escribiendo log: {e}")
+
+    return {
+        "estado": "ok",
+        "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "db_existe": db_exists,
+        "n_registros": n_registros
+    }
+
+def recolectar_datos():
     if not API_KEY:
-        return {"estado": "error", "mensaje": "API KEY no configurada"}
+        print("[RECOLECTAR] API KEY no configurada")
+        return
 
     try:
         headers = {"accept": "application/json", "api_key": API_KEY}
@@ -31,7 +57,8 @@ def recolectar():
         r2.raise_for_status()
         datos = r2.json()
     except Exception as e:
-        return {"estado": "error", "mensaje": f"Error al descargar datos: {e}"}
+        print(f"[RECOLECTAR] Error al descargar datos: {e}")
+        return
 
     conn = sqlite3.connect(DB_FILENAME)
     cursor = conn.cursor()
@@ -78,7 +105,7 @@ def recolectar():
             tamin = float(row.get("tamin", "nan"))
             hr = float(row.get("hr", "nan"))
             vv = float(row.get("vv", "nan"))
-            dv = row.get("dv", "")  # dirección cardinal como texto
+            dv = row.get("dv", "")
             vmax = float(row.get("vmax", "nan"))
             pres = float(row.get("pres", "nan"))
             pres_nmar = float(row.get("pres_nmar", "nan"))
@@ -87,12 +114,10 @@ def recolectar():
             inso = float(row.get("inso", "nan"))
             nieve = float(row.get("nieve", "nan"))
         except Exception as e:
-            print("Error procesando fila:", e)
+            print("[RECOLECTAR] Error procesando fila:", e)
             continue
 
-        cursor.execute("""
-            SELECT 1 FROM observaciones WHERE idema = ? AND fint = ?
-        """, (idema, fint))
+        cursor.execute("SELECT 1 FROM observaciones WHERE idema = ? AND fint = ?", (idema, fint))
         if cursor.fetchone():
             continue
 
@@ -110,15 +135,27 @@ def recolectar():
             ))
             insertados += 1
         except Exception as e:
-            print("Error insertando fila:", e)
+            print("[RECOLECTAR] Error insertando fila:", e)
 
     conn.commit()
     conn.close()
-    return {"estado": "ok", "insertados": insertados}
+    print(f"[RECOLECTAR] Recolección terminada. Registros insertados: {insertados}")
+
+@app.get("/recolectar")
+def recolectar_directo():
+    recolectar_datos()
+    return {"estado": "ok", "mensaje": "Recolección ejecutada directamente"}
+
+@app.get("/disparar-recolector")
+def recolector_en_segundo_plano():
+    Thread(target=recolectar_datos).start()
+    return {"estado": "ok", "mensaje": "Recolector lanzado en segundo plano"}
 
 @app.get("/descargar-db")
 def descargar_db():
     if os.path.exists(DB_FILENAME):
         return FileResponse(DB_FILENAME, media_type="application/octet-stream", filename=DB_FILENAME)
     return {"estado": "error", "mensaje": "Fichero de base de datos no encontrado"}
+
+
 

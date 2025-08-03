@@ -1,7 +1,9 @@
 name: Backup AEMET DB
 
 on:
-  workflow_dispatch:         # También permite ejecución manual
+  schedule:
+    - cron: '30 22 * * *'  # Cada día a las 00:30 hora peninsular (22:30 UTC)
+  workflow_dispatch:
 
 permissions:
   contents: write            # Necesario para hacer push

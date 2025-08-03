@@ -141,6 +141,29 @@ def recolectar_datos():
     conn.close()
     print(f"[RECOLECTAR] Recolección terminada. Registros insertados: {insertados}")
 
+@app.get("/healthz")
+def healthcheck():
+    db_exists = os.path.exists(DB_FILENAME)
+    estado = "ok"
+    n = -1
+
+    try:
+        if db_exists:
+            conn = sqlite3.connect(DB_FILENAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM observaciones")
+            n = cursor.fetchone()[0]
+            conn.close()
+        else:
+            estado = "sin_db"
+    except Exception as e:
+        estado = f"error_db: {e}"
+
+    return {
+        "estado": estado,
+        "registros": n
+    }
+
 @app.get("/recolectar")
 def recolectar_directo():
     recolectar_datos()
@@ -156,6 +179,3 @@ def descargar_db():
     if os.path.exists(DB_FILENAME):
         return FileResponse(DB_FILENAME, media_type="application/octet-stream", filename=DB_FILENAME)
     return {"estado": "error", "mensaje": "Fichero de base de datos no encontrado"}
-
-
-

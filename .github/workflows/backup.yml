@@ -2,7 +2,8 @@ name: Backup AEMET DB
 
 on:
   schedule:
-    - cron: '30 22 * * *'  # Cada día a las 00:30 hora peninsular (22:30 UTC)
+    - cron: '30 10 * * *'  # 12:30 hora peninsular (10:30 UTC)
+    - cron: '30 22 * * *'  # 00:30 hora peninsular (22:30 UTC)
   workflow_dispatch:
 
 permissions:

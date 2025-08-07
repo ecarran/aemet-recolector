@@ -6,18 +6,11 @@ from fastapi.responses import FileResponse
 from datetime import datetime
 from pytz import timezone
 from threading import Thread
-import time
 
 app = FastAPI()
 DB_FILENAME = "aemet_valladolid.db"
 API_URL = "https://opendata.aemet.es/opendata/api/observacion/convencional/todas/"
 API_KEY = os.getenv("AEMET_API_KEY")
-
-HEADERS = {
-    "accept": "application/json",
-    "api_key": API_KEY,
-    "User-Agent": "aemet-recolector/1.0 (Render)"
-}
 
 @app.get("/")
 def keep_alive():
@@ -55,109 +48,113 @@ def recolectar_datos():
         return
 
     try:
-        r1 = requests.get(API_URL, headers=HEADERS, timeout=10)
-        r1.raise_for_status()
-        url_datos = r1.json()["datos"]
-    except Exception as e:
-        print(f"[RECOLECTAR] Error en primer paso (r1): {e}")
-        return
+        headers = {
+            "accept": "application/json",
+            "api_key": API_KEY,
+            "User-Agent": "aemet-recolector/1.0"
+        }
 
-    time.sleep(1)  # pequeña espera entre r1 y r2
-
-    try:
-        r2 = requests.get(url_datos, timeout=10)
-        r2.raise_for_status()
-        datos = r2.json()
-    except Exception as e:
-        print(f"[RECOLECTAR] Error en segundo paso (r2): {e}")
-        return
-
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS observaciones (
-            idema TEXT,
-            ubi TEXT,
-            lon REAL,
-            lat REAL,
-            fint TEXT,
-            ta REAL,
-            tamax REAL,
-            tamin REAL,
-            hr REAL,
-            vv REAL,
-            dv TEXT,
-            vmax REAL,
-            pres REAL,
-            pres_nmar REAL,
-            prec REAL,
-            sol REAL,
-            inso REAL,
-            nieve REAL
-        )
-    """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_idema_fint ON observaciones(idema, fint)")
-
-    def parse_float(val):
+        # Primera petición (obtener URL de datos)
         try:
-            return float(val)
-        except:
-            return None
-
-    insertados = 0
-    for row in datos:
-        if row.get("ubi") != "VALLADOLID":
-            continue
-
-        try:
-            idema = row["idema"]
-            ubi = row["ubi"]
-            lon = float(row["lon"])
-            lat = float(row["lat"])
-            utc_dt = datetime.fromisoformat(row["fint"].replace("Z", "+00:00"))
-            fint = utc_dt.astimezone(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
-
-            ta = parse_float(row.get("ta"))
-            tamax = parse_float(row.get("tamax"))
-            tamin = parse_float(row.get("tamin"))
-            hr = parse_float(row.get("hr"))
-            vv = parse_float(row.get("vv"))
-            dv = row.get("dv", "")
-            vmax = parse_float(row.get("vmax"))
-            pres = parse_float(row.get("pres"))
-            pres_nmar = parse_float(row.get("pres_nmar"))
-            prec = parse_float(row.get("prec"))
-            sol = parse_float(row.get("sol"))
-            inso = parse_float(row.get("inso"))
-            nieve = parse_float(row.get("nieve"))
+            r1 = requests.get(API_URL, headers=headers)
+            r1.raise_for_status()
+            url_datos = r1.json()["datos"]
         except Exception as e:
-            print("[RECOLECTAR] Error procesando fila:", e)
-            continue
+            print(f"[RECOLECTAR] Error en petición r1: {e}")
+            return
 
-        cursor.execute("SELECT 1 FROM observaciones WHERE idema = ? AND fint = ?", (idema, fint))
-        if cursor.fetchone():
-            continue
-
+        # Segunda petición (obtener datos reales)
         try:
-            cursor.execute("""
-                INSERT INTO observaciones (
+            r2 = requests.get(url_datos, headers=headers)
+            r2.raise_for_status()
+            datos = r2.json()
+        except Exception as e:
+            print(f"[RECOLECTAR] Error en petición r2: {e}")
+            return
+
+        conn = sqlite3.connect(DB_FILENAME)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS observaciones (
+                idema TEXT,
+                ubi TEXT,
+                lon REAL,
+                lat REAL,
+                fint TEXT,
+                ta REAL,
+                tamax REAL,
+                tamin REAL,
+                hr REAL,
+                vv REAL,
+                dv TEXT,
+                vmax REAL,
+                pres REAL,
+                pres_nmar REAL,
+                prec REAL,
+                sol REAL,
+                inso REAL,
+                nieve REAL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_idema_fint ON observaciones(idema, fint)")
+
+        insertados = 0
+        for row in datos:
+            if row.get("ubi") != "VALLADOLID":
+                continue
+
+            try:
+                idema = row["idema"]
+                ubi = row["ubi"]
+                lon = float(row["lon"])
+                lat = float(row["lat"])
+                utc_dt = datetime.fromisoformat(row["fint"].replace("Z", "+00:00"))
+                fint = utc_dt.astimezone(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
+
+                ta = float(row.get("ta", "nan"))
+                tamax = float(row.get("tamax", "nan"))
+                tamin = float(row.get("tamin", "nan"))
+                hr = float(row.get("hr", "nan"))
+                vv = float(row.get("vv", "nan"))
+                dv = row.get("dv", "")
+                vmax = float(row.get("vmax", "nan"))
+                pres = float(row.get("pres", "nan"))
+                pres_nmar = float(row.get("pres_nmar", "nan"))
+                prec = float(row.get("prec", "nan"))
+                sol = float(row.get("sol", "nan"))
+                inso = float(row.get("inso", "nan"))
+                nieve = float(row.get("nieve", "nan"))
+            except Exception as e:
+                print("[RECOLECTAR] Error procesando fila:", e)
+                continue
+
+            cursor.execute("SELECT 1 FROM observaciones WHERE idema = ? AND fint = ?", (idema, fint))
+            if cursor.fetchone():
+                continue
+
+            try:
+                cursor.execute("""
+                    INSERT INTO observaciones (
+                        idema, ubi, lon, lat, fint, ta, tamax, tamin,
+                        hr, vv, dv, vmax, pres, pres_nmar, prec,
+                        sol, inso, nieve
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
                     idema, ubi, lon, lat, fint, ta, tamax, tamin,
                     hr, vv, dv, vmax, pres, pres_nmar, prec,
                     sol, inso, nieve
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                idema, ubi, lon, lat, fint, ta, tamax, tamin,
-                hr, vv, dv, vmax, pres, pres_nmar, prec,
-                sol, inso, nieve
-            ))
-            insertados += 1
-        except Exception as e:
-            print("[RECOLECTAR] Error insertando fila:", e)
+                ))
+                insertados += 1
+            except Exception as e:
+                print("[RECOLECTAR] Error insertando fila:", e)
 
-    conn.commit()
-    conn.close()
-    print(f"[RECOLECTAR] Recolección terminada. Registros insertados: {insertados}")
+        conn.commit()
+        conn.close()
+        print(f"[RECOLECTAR] Recolección terminada. Registros insertados: {insertados}")
+
+    except Exception as e:
+        print(f"[RECOLECTAR] Error inesperado: {e}")
 
 @app.get("/healthz")
 def healthcheck():
@@ -189,13 +186,7 @@ def recolectar_directo():
 
 @app.get("/disparar-recolector")
 def recolector_en_segundo_plano():
-    def recolectar_seguro():
-        try:
-            recolectar_datos()
-        except Exception as e:
-            print(f"[RECOLECTAR] Excepción inesperada en hilo: {e}")
-
-    Thread(target=recolectar_seguro).start()
+    Thread(target=recolectar_datos).start()
     return {"estado": "ok", "mensaje": "Recolector lanzado en segundo plano"}
 
 @app.get("/descargar-db")
